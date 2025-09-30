@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
@@ -24,14 +25,18 @@ jobs:
     name: Build & push Docker image
     needs: test
     runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.docker_build.outputs.image }}
     steps:
       - uses: actions/checkout@v4
+
       - name: Log in to Azure
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Build and push image to ACR
+        id: docker_build
         run: |
           IMAGE=${{ secrets.ACR_LOGIN_SERVER }}/fastapi-app:${{ github.sha }}
           echo "Building Docker image: $IMAGE"
@@ -39,39 +44,22 @@ jobs:
           echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} \
             --username "${{ secrets.ACR_USERNAME }}" --password-stdin
           docker push $IMAGE
-          echo $IMAGE > image.txt
-
-      - name: Upload image artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: image
-          path: image.txt
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT   # ✅ export image to job outputs
 
   deploy-staging:
     name: Deploy to staging (ACI)
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - name: Download image artifact
-        uses: actions/download-artifact@v3
-        with:
-          name: image
-
-      - name: Read image tag
-        id: read_image
-        run: echo "IMAGE=$(cat image.txt)" >> $GITHUB_ENV
-
       - name: Log in to Azure
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Create resource group for staging
-        run: az group create -n sit722-staging-rg -l australiasoutheast
-
       - name: Deploy container to ACI
         run: |
           ACI_NAME=staging-${{ github.run_id }}
+          IMAGE=${{ needs.build-and-push.outputs.image }}
           echo "Deploying image: $IMAGE"
           az container create \
             --resource-group sit722-staging-rg \
