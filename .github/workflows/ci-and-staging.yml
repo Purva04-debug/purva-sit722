@@ -10,11 +10,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-      - run: pip install -r requirements.txt
-      - run: pytest || echo "⚠️ No tests found, skipping tests"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest || echo "⚠️ No tests found, skipping tests"
 
   build-and-push:
     name: Build & push Docker image
@@ -22,29 +27,43 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: azure/login@v1
+
+      - name: Log in to Azure
+        uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
-      - run: az acr login --name ${{ secrets.ACR_NAME }}
-      - run: |
+
+      - name: Build and push image to ACR
+        run: |
           IMAGE=${{ secrets.ACR_LOGIN_SERVER }}/fastapi-app:${{ github.sha }}
+          echo "Building Docker image: $IMAGE"
           docker build -t $IMAGE .
+          echo "Logging in to ACR..."
+          echo ${{ secrets.ACR_PASSWORD }} | docker login ${{ secrets.ACR_LOGIN_SERVER }} \
+            --username ${{ secrets.ACR_USERNAME }} --password-stdin
+          echo "Pushing image to ACR..."
           docker push $IMAGE
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
 
   deploy-staging:
-    name: Deploy to staging
+    name: Deploy to staging (ACI)
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - uses: azure/login@v1
+      - name: Log in to Azure
+        uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
-      - run: |
-          az group create -n ${{ secrets.STAGING_RG }} -l ${{ secrets.AZURE_REGION }}
+
+      - name: Create resource group for staging
+        run: |
+          az group create -n sit722-staging-rg -l australiasoutheast
+
+      - name: Deploy container to ACI
+        run: |
           ACI_NAME=staging-${{ github.run_id }}
           az container create \
-            --resource-group ${{ secrets.STAGING_RG }} \
+            --resource-group sit722-staging-rg \
             --name $ACI_NAME \
             --image ${{ env.IMAGE }} \
             --dns-name-label $ACI_NAME \
@@ -52,18 +71,23 @@ jobs:
             --registry-username ${{ secrets.ACR_USERNAME }} \
             --registry-password ${{ secrets.ACR_PASSWORD }} \
             --ports 80
-          az container show -g ${{ secrets.STAGING_RG }} -n $ACI_NAME --query ipAddress.fqdn -o tsv > fqdn.txt
-      - run: |
+          az container show -g sit722-staging-rg -n $ACI_NAME --query ipAddress.fqdn -o tsv > fqdn.txt
+
+      - name: Health check
+        run: |
           FQDN=$(cat fqdn.txt)
           echo "Checking http://$FQDN ..."
-          for i in 1 2 3 4 5; do
+          for i in {1..5}; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://$FQDN/)
             echo "Attempt $i → $STATUS"
             if [ "$STATUS" = "200" ]; then exit 0; fi
             sleep 5
           done
           exit 1
-      - run: |
+
+      - name: Cleanup staging
+        if: always()
+        run: |
           ACI_NAME=staging-${{ github.run_id }}
-          az container delete -g ${{ secrets.STAGING_RG }} -n $ACI_NAME --yes
-          az group delete -n ${{ secrets.STAGING_RG }} --yes --no-wait
+          az container delete -g sit722-staging-rg -n $ACI_NAME --yes
+          az group delete -n sit722-staging-rg --yes --no-wait
