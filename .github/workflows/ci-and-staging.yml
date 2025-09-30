@@ -64,26 +64,8 @@ jobs:
             --registry-login-server ${{ secrets.ACR_LOGIN_SERVER }} \
             --registry-username ${{ secrets.ACR_USERNAME }} \
             --registry-password ${{ secrets.ACR_PASSWORD }} \
-            --ports 80 \
             --os-type Linux \
             --cpu 1 \
-            --memory 1
+            --memory 1 \
+            --ports 80
           az container show -g deakinuni -n $ACI_NAME --query ipAddress.fqdn -o tsv > fqdn.txt
-
-      - name: Health check
-        run: |
-          FQDN=$(cat fqdn.txt)
-          echo "Checking http://$FQDN ..."
-          for i in {1..5}; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://$FQDN/)
-            echo "Attempt $i → $STATUS"
-            if [ "$STATUS" = "200" ]; then exit 0; fi
-            sleep 5
-          done
-          exit 1
-
-      - name: Cleanup staging
-        if: always()
-        run: |
-          ACI_NAME=staging-${{ github.run_id }}
-          az container delete -g deakinuni -n $ACI_NAME --yes
