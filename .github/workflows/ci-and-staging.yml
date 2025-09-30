@@ -44,7 +44,7 @@ jobs:
           docker push $IMAGE
           echo "✅ Pushed image: $IMAGE"
 
-    deploy-staging:
+  deploy-staging:
     name: Deploy to staging (ACI)
     needs: build-and-push
     runs-on: ubuntu-latest
@@ -53,9 +53,6 @@ jobs:
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Set IMAGE variable
-        run: echo "IMAGE=${{ secrets.ACR_LOGIN_SERVER }}/fastapi-app:${{ github.sha }}" >> $GITHUB_ENV
 
       - name: Deploy container to ACI
         run: |
@@ -74,7 +71,6 @@ jobs:
             --cpu 1 \
             --memory 1
           az container show -g deakinuni -n $ACI_NAME --query ipAddress.fqdn -o tsv > fqdn.txt
-
 
       - name: Health check
         run: |
