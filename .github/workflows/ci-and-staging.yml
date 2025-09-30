@@ -25,6 +25,8 @@ jobs:
     name: Build & push Docker image
     needs: test
     runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.docker_build.outputs.image }}
     steps:
       - uses: actions/checkout@v4
 
@@ -34,6 +36,7 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Build and push image to ACR
+        id: docker_build
         run: |
           IMAGE=${{ secrets.ACR_LOGIN_SERVER }}/fastapi-app:${{ github.sha }}
           echo "Building Docker image: $IMAGE"
@@ -43,7 +46,7 @@ jobs:
             --username "${{ secrets.ACR_USERNAME }}" --password-stdin
           echo "Pushing image to ACR..."
           docker push $IMAGE
-          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
 
   deploy-staging:
     name: Deploy to staging (ACI)
@@ -65,7 +68,7 @@ jobs:
           az container create \
             --resource-group sit722-staging-rg \
             --name $ACI_NAME \
-            --image ${{ env.IMAGE }} \
+            --image ${{ needs.build-and-push.outputs.image }} \
             --dns-name-label $ACI_NAME \
             --registry-login-server ${{ secrets.ACR_LOGIN_SERVER }} \
             --registry-username ${{ secrets.ACR_USERNAME }} \
