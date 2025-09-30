@@ -1,0 +1,69 @@
+name: CI → Build → Staging deploy (testing branch)
+
+on:
+  push:
+    branches: [ testing ]
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+      - run: npm ci
+      - run: npm test
+
+  build-and-push:
+    name: Build & push Docker image
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - run: az acr login --name ${{ secrets.ACR_NAME }}
+      - run: |
+          IMAGE=${{ secrets.ACR_LOGIN_SERVER }}/app:${{ github.sha }}
+          docker build -t $IMAGE .
+          docker push $IMAGE
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+
+  deploy-staging:
+    name: Deploy to staging
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - run: |
+          az group create -n ${{ secrets.STAGING_RG }} -l ${{ secrets.AZURE_REGION }}
+          ACI_NAME=staging-${{ github.run_id }}
+          az container create \
+            --resource-group ${{ secrets.STAGING_RG }} \
+            --name $ACI_NAME \
+            --image ${{ env.IMAGE }} \
+            --dns-name-label $ACI_NAME \
+            --registry-login-server ${{ secrets.ACR_LOGIN_SERVER }} \
+            --registry-username ${{ secrets.ACR_USERNAME }} \
+            --registry-password ${{ secrets.ACR_PASSWORD }} \
+            --ports 80
+          az container show -g ${{ secrets.STAGING_RG }} -n $ACI_NAME --query ipAddress.fqdn -o tsv > fqdn.txt
+      - run: |
+          FQDN=$(cat fqdn.txt)
+          echo "Checking http://$FQDN ..."
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://$FQDN/)
+            echo "Attempt $i → $STATUS"
+            if [ "$STATUS" = "200" ]; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+      - run: |
+          ACI_NAME=staging-${{ github.run_id }}
+          az container delete -g ${{ secrets.STAGING_RG }} -n $ACI_NAME --yes
+          az group delete -n ${{ secrets.STAGING_RG }} --yes --no-wait
