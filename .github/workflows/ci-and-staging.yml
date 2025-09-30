@@ -26,7 +26,7 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     outputs:
-      built_image: ${{ steps.push.outputs.image }}
+      image: ${{ steps.docker.outputs.image }}
     steps:
       - uses: actions/checkout@v4
 
@@ -36,7 +36,7 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Build and push image to ACR
-        id: push
+        id: docker
         run: |
           IMAGE=${{ secrets.ACR_LOGIN_SERVER }}/fastapi-app:${{ github.sha }}
           echo "Building Docker image: $IMAGE"
@@ -65,7 +65,7 @@ jobs:
       - name: Deploy container to ACI
         run: |
           ACI_NAME=staging-${{ github.run_id }}
-          IMAGE=${{ needs.build-and-push.outputs.built_image }}
+          IMAGE=${{ needs.build-and-push.outputs.image }}
           echo "Deploying image: $IMAGE"
           az container create \
             --resource-group sit722-staging-rg \
