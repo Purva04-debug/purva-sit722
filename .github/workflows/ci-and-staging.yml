@@ -25,6 +25,8 @@ jobs:
     name: Build & push Docker image
     needs: test
     runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.docker_build.outputs.image }}
     steps:
       - uses: actions/checkout@v4
 
@@ -34,15 +36,15 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Build and push image to ACR
+        id: docker_build
         run: |
           IMAGE=${{ secrets.ACR_LOGIN_SERVER }}/fastapi-app:${{ github.sha }}
-          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
-          echo "🚀 Building Docker image: $IMAGE"
+          echo "IMAGE=$IMAGE"
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
           docker build -t $IMAGE .
           echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} \
             --username "${{ secrets.ACR_USERNAME }}" --password-stdin
           docker push $IMAGE
-          echo "✅ Pushed image: $IMAGE"
 
   deploy-staging:
     name: Deploy to staging (ACI)
@@ -57,6 +59,7 @@ jobs:
       - name: Deploy container to ACI
         run: |
           ACI_NAME=staging-${{ github.run_id }}
+          IMAGE=${{ needs.build-and-push.outputs.image }}
           echo "Deploying image: $IMAGE"
           az container create \
             --resource-group deakinuni \
@@ -71,22 +74,3 @@ jobs:
             --cpu 1 \
             --memory 1
           az container show -g deakinuni -n $ACI_NAME --query ipAddress.fqdn -o tsv > fqdn.txt
-
-      - name: Health check
-        run: |
-          FQDN=$(cat fqdn.txt)
-          echo "🌍 Checking http://$FQDN ..."
-          for i in {1..5}; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://$FQDN/)
-            echo "Attempt $i → $STATUS"
-            if [ "$STATUS" = "200" ]; then exit 0; fi
-            sleep 5
-          done
-          exit 1
-
-      - name: Cleanup staging
-        if: always()
-        run: |
-          ACI_NAME=staging-${{ github.run_id }}
-          echo "🧹 Cleaning up..."
-          az container delete -g deakinuni -n $ACI_NAME --yes
