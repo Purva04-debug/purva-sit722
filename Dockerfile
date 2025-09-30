@@ -1,20 +1,21 @@
-# Use an official lightweight Python image
+# Use official Python image
 FROM python:3.10-slim
 
-# Set the working directory inside the container
+# Set working directory
 WORKDIR /app
 
-# Copy requirements.txt first (better caching)
+# Copy requirements
 COPY requirements.txt .
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the code
+# Copy app code
 COPY . .
 
-# Expose FastAPI port
+# Expose port 80 (for Azure Container Instance)
 EXPOSE 80
 
-# Run FastAPI with Uvicorn
+# Run FastAPI app with uvicorn on port 80
+# Replace 'main:app' with your filename:function (e.g., if your app is in app.py use 'app:app')
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]
