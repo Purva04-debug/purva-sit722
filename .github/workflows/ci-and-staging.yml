@@ -26,7 +26,7 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     outputs:
-      image: ${{ steps.push.outputs.image }}   # 👈 pass image name to next job
+      image: ${{ steps.docker_build.outputs.image }}
     steps:
       - uses: actions/checkout@v4
 
@@ -36,7 +36,7 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Build and push image to ACR
-        id: push   # 👈 step id
+        id: docker_build
         run: |
           IMAGE=${{ secrets.ACR_LOGIN_SERVER }}/fastapi-app:${{ github.sha }}
           echo "Building Docker image: $IMAGE"
@@ -44,7 +44,7 @@ jobs:
           echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} \
             --username "${{ secrets.ACR_USERNAME }}" --password-stdin
           docker push $IMAGE
-          echo "image=$IMAGE" >> $GITHUB_OUTPUT   # 👈 save output for next job
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT   # ✅ export image to job outputs
 
   deploy-staging:
     name: Deploy to staging (ACI)
@@ -56,10 +56,6 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Create resource group for staging
-        run: |
-          az group create -n sit722-staging-rg -l australiasoutheast
-
       - name: Deploy container to ACI
         run: |
           ACI_NAME=staging-${{ github.run_id }}
@@ -69,11 +65,12 @@ jobs:
             --resource-group sit722-staging-rg \
             --name $ACI_NAME \
             --image $IMAGE \
-            --dns-name-label $ACI_NAME \
+            --dns-name-label staging${{ github.run_id }} \
             --registry-login-server ${{ secrets.ACR_LOGIN_SERVER }} \
             --registry-username ${{ secrets.ACR_USERNAME }} \
             --registry-password ${{ secrets.ACR_PASSWORD }} \
-            --ports 80
+            --ports 80 \
+            --os-type Linux
           az container show -g sit722-staging-rg -n $ACI_NAME --query ipAddress.fqdn -o tsv > fqdn.txt
 
       - name: Health check
