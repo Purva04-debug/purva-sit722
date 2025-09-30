@@ -39,8 +39,8 @@ jobs:
           echo "Building Docker image: $IMAGE"
           docker build -t $IMAGE .
           echo "Logging in to ACR..."
-          echo ${{ secrets.ACR_PASSWORD }} | docker login ${{ secrets.ACR_LOGIN_SERVER }} \
-            --username ${{ secrets.ACR_USERNAME }} --password-stdin
+          echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} \
+            --username "${{ secrets.ACR_USERNAME }}" --password-stdin
           echo "Pushing image to ACR..."
           docker push $IMAGE
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
