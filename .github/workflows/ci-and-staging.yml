@@ -25,8 +25,6 @@ jobs:
     name: Build & push Docker image
     needs: test
     runs-on: ubuntu-latest
-    outputs:
-      image: ${{ steps.docker_build.outputs.image }}
     steps:
       - uses: actions/checkout@v4
 
@@ -36,15 +34,15 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Build and push image to ACR
-        id: docker_build
         run: |
           IMAGE=${{ secrets.ACR_LOGIN_SERVER }}/fastapi-app:${{ github.sha }}
-          echo "Building Docker image: $IMAGE"
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+          echo "🚀 Building Docker image: $IMAGE"
           docker build -t $IMAGE .
           echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} \
             --username "${{ secrets.ACR_USERNAME }}" --password-stdin
           docker push $IMAGE
-          echo "image=$IMAGE" >> $GITHUB_OUTPUT   # ✅ export image to job outputs
+          echo "✅ Pushed image: $IMAGE"
 
   deploy-staging:
     name: Deploy to staging (ACI)
@@ -59,10 +57,9 @@ jobs:
       - name: Deploy container to ACI
         run: |
           ACI_NAME=staging-${{ github.run_id }}
-          IMAGE=${{ needs.build-and-push.outputs.image }}
           echo "Deploying image: $IMAGE"
           az container create \
-            --resource-group sit722-staging-rg \
+            --resource-group deakinuni \
             --name $ACI_NAME \
             --image $IMAGE \
             --dns-name-label staging${{ github.run_id }} \
@@ -70,13 +67,15 @@ jobs:
             --registry-username ${{ secrets.ACR_USERNAME }} \
             --registry-password ${{ secrets.ACR_PASSWORD }} \
             --ports 80 \
-            --os-type Linux
-          az container show -g sit722-staging-rg -n $ACI_NAME --query ipAddress.fqdn -o tsv > fqdn.txt
+            --os-type Linux \
+            --cpu 1 \
+            --memory 1
+          az container show -g deakinuni -n $ACI_NAME --query ipAddress.fqdn -o tsv > fqdn.txt
 
       - name: Health check
         run: |
           FQDN=$(cat fqdn.txt)
-          echo "Checking http://$FQDN ..."
+          echo "🌍 Checking http://$FQDN ..."
           for i in {1..5}; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://$FQDN/)
             echo "Attempt $i → $STATUS"
@@ -89,5 +88,5 @@ jobs:
         if: always()
         run: |
           ACI_NAME=staging-${{ github.run_id }}
-          az container delete -g sit722-staging-rg -n $ACI_NAME --yes
-          az group delete -n sit722-staging-rg --yes --no-wait
+          echo "🧹 Cleaning up..."
+          az container delete -g deakinuni -n $ACI_NAME --yes
